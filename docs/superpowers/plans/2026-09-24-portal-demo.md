@@ -12,7 +12,7 @@
 
 - 设计依据：`docs/superpowers/specs/2026-09-24-portal-demo-design.md`，实施前先由用户审阅。
 - 只修改 `apps/frontend` 下的演示功能及必要的前端测试配置；不改 NestJS、Prisma、现有登录页、首页、环境文件和 `package-lock.json`。
-- 演示地址 `/en/demo`，界面中文；`en` 为现有 locale 前缀。只使用虚构 `.example` 邮箱及案件。
+- 用户入口 `/demo` 应进入演示页，实际页面 `/en/demo` 可直接访问；界面中文。只使用虚构 `.example` 邮箱及案件。
 - 预置演示账号密码为 `Demo123!`；持久化时只存盐和派生摘要，不存明文密码或上传文件内容。
 - 文件仅接受 PNG、JPEG、CSV、XLS、XLSX，单文件不超过 10 MB；保存资料元数据，不提供刷新后的文件下载。
 - 所有浏览器端权限均只用于演示，界面应标明模拟注册、验证码、PG 更新和审核。
@@ -24,7 +24,7 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `apps/frontend/src/app/[locale]/demo/page.tsx` | 演示页入口与静态元数据，挂载客户端应用。 |
+| `apps/frontend/src/app/[locale]/demo/page.tsx` | 演示页入口与静态元数据；输出 `<body><PortalDemo /></body>`，符合现有 `[locale]/layout.tsx` 输出 `<html>` 的结构。 |
 | `apps/frontend/src/features/portal-demo/model.ts` | `DemoState`、`DemoUser`、`DemoCase`、`DemoDocument`、`DemoFilters` 等领域类型。 |
 | `apps/frontend/src/features/portal-demo/seed.ts` | 两家公司、办理人白名单、预置账号、项目、案件、进展和通知。 |
 | `apps/frontend/src/features/portal-demo/security.ts` | Web Crypto 密码摘要、验证及模拟验证码生成。 |
@@ -38,18 +38,18 @@
 | `apps/frontend/src/features/portal-demo/ReportsPanel.tsx` | 基于可见案件的统计和筛选。 |
 | `apps/frontend/src/features/portal-demo/ProfilePanel.tsx` | 用户资料与改密。 |
 | `apps/frontend/src/features/portal-demo/*.spec.ts` | 领域规则、持久化和数据隔离单元测试。 |
-| `apps/frontend/vitest.config.mjs`、`apps/frontend/package.json` | 给前端新增局部 Vitest 测试命令；只在确有测试运行需要时添加。 |
+| `apps/frontend/vitest.config.mjs`、`apps/frontend/package.json` | 给前端新增局部 Vitest 配置与固定的 `test:demo` 测试命令。 |
 
 关键接口统一为：`getVisibleCases(state: DemoState, userId: string): DemoCase[]`；`filterCases(cases: DemoCase[], filters: DemoFilters): DemoCase[]`；`getReport(cases: DemoCase[]): DemoReport`。组件经 `useDemoStore(): { state, dispatch, storageWarning }` 访问状态，动作只能修改当前公司范围内的数据。
 
 ### Task 1: 演示数据模型与持久化底座
 
-**Files:** Create `model.ts`, `seed.ts`, `security.ts`, `store.tsx`, `store.spec.ts`; optionally create `apps/frontend/vitest.config.mjs` and modify `apps/frontend/package.json` for a `test:demo` script.
+**Files:** Create `model.ts`, `seed.ts`, `security.ts`, `store.tsx`, `store.spec.ts`, `apps/frontend/vitest.config.mjs`; modify `apps/frontend/package.json` to add `test:demo`.
 
-**Interfaces:** Produces `DemoState`, `DemoAction`, `createSeedState(): Promise<DemoState>`, `loadDemoState(): Promise<DemoState>`, `saveDemoState(state): void`, `useDemoStore()`。`DemoState` 包含 `version: 1`、`users`、`handlers`、`companies`、`projects`、`cases`、`documents`、`notices`、`sessionUserId`。使用固定键 `o2s-portal-demo-v1`。
+**Interfaces:** Produces `DemoState`, `DemoAction`, `createSeedState(): Promise<DemoState>`, `loadDemoState(): Promise<DemoState>`, `saveDemoState(state): void`, `useDemoStore()`。`DemoState` 包含 `version: 1`、`users`、`handlers`、`companies`、`projects`、`cases`、`documents`、`notices`、`sessionUserId`；`DemoCase.caseScope` 固定为 `'案件' | '企业案件'`，种子数据两类均至少一条。使用固定键 `o2s-portal-demo-v1`。
 
 - [ ] 写 `store.spec.ts`：首访生成两家公司与账号；损坏 JSON/旧版本安全重置；状态写入、刷新读取后保留权限和进展；存储失败回退内存。
-- [ ] 运行 `npm exec --workspace=@o2s/frontend -- vitest run src/features/portal-demo/store.spec.ts`，确认缺失实现导致失败；若需配置，在本任务中加入最小 Vitest 配置和 `test:demo` 脚本。
+- [ ] 加入最小 Vitest 配置和 `test:demo` 脚本，运行 `npm run test:demo --workspace=@o2s/frontend -- src/features/portal-demo/store.spec.ts`，确认缺失实现导致失败。
 - [ ] 实现模型、种子数据与状态层。密码摘要使用 Web Crypto PBKDF2、每个账号独立随机盐；示例：`derivePassword(password, salt) -> Promise<string>`，不把原密码写入 `DemoState`。对 localStorage 解析结果做版本及必要字段校验；挂载后读取以避免 SSR hydration 不一致。
 - [ ] 运行上述局部测试并通过；检查 `JSON.stringify(state)` 不包含 `Demo123!`。仅提交本任务涉及的前端文件。
 
@@ -90,11 +90,11 @@ expect(await signIn(registered.state, { email: 'new.handler@north.example', pass
 
 **Files:** Create `selectors.ts`, `selectors.spec.ts`, `CasesPanel.tsx`; modify `store.tsx` with `advanceCase` 动作。
 
-**Interfaces:** Produces `getVisibleCases(state, userId)`、`filterCases(cases, filters)`、`getCaseTree(cases, projects, companies)`、`getVisibleDocuments(state, userId)`、`getVisibleNotices(state, userId)`；store 动作 `advanceCase(caseId)` 仅推进当前用户可见案件的预定义阶段，并同时写入更新时间、进展节点及通知。
+**Interfaces:** Produces `getVisibleCases(state, userId)`、`filterCases(cases, filters)`、`getCaseTree(cases, projects, companies)`、`getVisibleDocuments(state, userId)`、`getVisibleNotices(state, userId)`；`DemoCase.caseScope` 为 `'案件' | '企业案件'`，与业务类型字段分开。store 动作 `advanceCase(caseId)` 仅推进当前用户可见案件的预定义阶段，并同时写入更新时间、进展节点及通知。
 
-- [ ] 写 `selectors.spec.ts`：管理员可见本公司全部案件；成员只见授权案件；跨公司 ID 无效；关键词、状态、阶段、类型、地区、负责人、日期区间组合筛选；排序；树为空分支不显示。
+- [ ] 写 `selectors.spec.ts`：管理员可见本公司全部案件；成员只见授权案件；跨公司 ID 无效；“案件/企业案件”各有样例且可分别查询或合并查看；关键词、案件类别、状态、阶段、业务类型、地区、负责人、日期区间组合筛选；排序；树为空分支不显示。
 - [ ] 运行局部测试，确认预期失败。
-- [ ] 实现公司 → 项目 → 案件树、字段丰富的列表和详情时间线。筛选器使用同一个 `DemoFilters` 状态，列表与详情均从可见集合取值；模拟 PG 更新按有限状态机推进并新增通知，界面显示“演示操作”。
+- [ ] 实现公司 → 项目 → 案件树、字段丰富的列表、案件类别切换和详情时间线。筛选器使用同一个 `DemoFilters` 状态，列表与详情均从可见集合取值；模拟 PG 更新按有限状态机推进并新增通知，界面显示“演示操作”。
 - [ ] 重跑局部测试，确认不同身份的树与详情数据以及模拟进展刷新后的状态。浏览器验证留到 Task 6。仅提交本任务文件。
 
 测试及选择器示例：
@@ -135,7 +135,7 @@ expect(() => addDocument(state, 'member-north', { caseId: 'case-south-1', fileNa
 
 - [ ] 写 `reports.spec.ts`：权限收紧后报表数量减少；模拟进展后阶段分布变化；筛选后统计一致；空结果显示 0 而非错误。
 - [ ] 运行局部测试，确认预期失败。
-- [ ] 完成中文导航、总览、案件、资料、报表、成员权限、个人资料与退出入口。管理员才显示权限工作区。页面设静态标题，`/en/demo` 不触发 SDK 页面请求；宽屏与窄屏均可操作，交互控件有标签和键盘焦点。
+- [ ] 完成中文导航、总览、案件、资料、报表、成员权限、个人资料与退出入口。管理员才显示权限工作区。服务端页面设静态标题并输出 `<body><PortalDemo /></body>`；不触发 SDK 页面请求。宽屏与窄屏均可操作，交互控件有标签和键盘焦点。
 - [ ] 重跑局部测试；运行 `npm exec --workspace=@o2s/frontend -- tsc --noEmit` 和针对新增文件的 ESLint，修复本次引入的错误。仅提交本任务文件。
 
 报表口径示例：
@@ -151,7 +151,7 @@ expect(Object.values(report.byStatus).reduce((a, b) => a + b, 0)).toBe(report.to
 
 **Files:** 本任务不新增文件；记录浏览器验收结果并修复本轮实现引入的问题。
 
-- [ ] 在不修改现有环境文件的前提下启动 `npm run dev --workspace=@o2s/frontend`，访问 `http://localhost:3000/en/demo`。若启动依赖项缺失，先记录完整错误日志再修复演示版范围内的问题。
+- [ ] 在不修改现有环境文件的前提下启动 `npm run dev --workspace=@o2s/frontend`，分别访问 `http://localhost:3000/demo` 与 `http://localhost:3000/en/demo`。如果国际化中间件未让 `/demo` 到达演示页，在 Task 5 的路由范围内补明确跳转后重新验证。若启动依赖项缺失，先记录完整错误日志再修复演示版范围内的问题。
 - [ ] 走通注册 → 验证 → 登录 → 个人资料 → 案件筛选/树/详情 → 模拟 PG 更新 → 资料上传/审核 → 管理员授权 → 成员视图 → 报表流程。刷新后核对持久化，重置后核对回到种子状态；用两家公司账号检验隔离。
 - [ ] 用 `npm run test:demo --workspace=@o2s/frontend`、前端类型检查和新增文件 ESLint 复验；检查 git diff 只包含演示版文件与测试配置，确认原有用户改动未覆盖。
 - [ ] 向用户交付访问地址、演示账号、启动命令、已验证事项和模拟功能限制。只有在验证通过后才报告完成。
